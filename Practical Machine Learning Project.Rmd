@@ -1,0 +1,113 @@
+Practical Machine Learnnig - Project
+========================================================
+Submitter: Jerry Kickenson
+
+
+Read in data sets
+```{r}
+pmltrain <- read.csv("pml-training.csv", header=TRUE)
+pmltest <- read.csv("pml-test.csv", header=TRUE)
+```
+
+
+Looking at the data, one sees lots of missing data, both in columns and rows.  There are also variables which likely have nothing to do with the outcome.  With 160 variables, we need to get that number down. The data is thus first transformed as follows:
+
+1. Calculate variables that have near zero variation and remove them.  This decreases number of variables to 100.
+```{r}
+nzvcols <- nearZeroVar(pmltrain, saveMetrics=FALSE)
+pmltrain2 <- pmltrain[,-nzvcols]
+```
+2. Remove the first 5 variables, since the outcome is not going to depend on the row number, name of the user, or the times when exercise was done.  This further decreases the number of variables to 95.
+```{r}
+pmltrain3 <- pmltrain2[,-c(1:5)]
+```
+3. Summarizing the latest transformed data, one sees lots of columns that are mostly missing data (NAs).  Remove those columns (variables).  This further decreases the number of variables to 54.
+```{r}
+pmltrain4 <- pmltrain3[, which(as.numeric(colSums(is.na(pmltrain3))) != 14410)]
+```
+
+
+Do the same transformation to the probe data.
+```{r}
+pmltest2 <- pmltest[,-nzvcols]
+pmltest3 <- pmltest2[,-c(1:5)]
+pmltest4 <- pmltest3[,which(as.numeric(colSums(is.na(pmltest3))) != 4806)]
+```
+
+For cross validation, split the training data set into training and probe sets.  We will train on the resulting training data, and test the resulting model against the probe data.
+
+```{r}
+inTrain <- createDataPartition(y=pmltrain4$classe, p=0.75, list=FALSE)
+mytrain <- pmltest4[inTrain,]
+mytest <- pmltest4[-inTrain,]
+```
+
+
+54 variables are still too many.  Apply principal components analysis on the transformed training data.  Let's get enough components to explain at least 95% of the variability:
+
+
+```{r}
+preProc <- preProcess(mytrain[,-54], method="pca", thresh=0.95)
+```
+
+This gives us 25 components:
+
+Call:
+preProcess.default(x = mytrain1[, -54], method = "pca", thresh = 0.95)
+
+Created from 14718 samples and 53 variables
+Pre-processing: principal component signal extraction, scaled, centered 
+
+PCA needed 25 components to capture 95 percent of the variance
+
+Now train a random forest model on the principal components:
+
+```{r}
+trainPC <- predict(preProc, mytrain[,-54])
+modFit <- train(mytrain1$classe ~ ., method="rf", data=trainPC)
+```
+This training took almost one hour on my Macbook Air.
+
+Run model on probe (my test set) with same preprocessing as done on training set, then calculate confusion matrix:
+```{r}
+testPC <- predict(preProc, mytest1[,-54])
+pred <- predict(modFit, testPC)
+confusionMatrix(mytest1$classe, pred)
+```
+Confusion Matrix and Statistics
+
+          Reference
+Prediction    A    B    C    D    E
+         A 1383    5    6    1    0
+         B   17  921    9    1    1
+         C    2   13  833    5    2
+         D    0    2   44  757    1
+         E    1    0    2    5  893
+
+Overall Statistics
+                                          
+               Accuracy : 0.9761          
+                 95% CI : (0.9715, 0.9802)
+    No Information Rate : 0.2861          
+    P-Value [Acc > NIR] : < 2.2e-16       
+                                          
+                  Kappa : 0.9698          
+ Mcnemar's Test P-Value : 1.258e-06       
+
+Accuracy is very good (> 97%) with a 95% confidence interval that the out of sample error is bounded to < 0.5%.  
+
+Now finally apply model to project test data to generate predictions (applying the same transformations and principal component analysis):
+
+```{r}
+pmltest4 <- pmltest3[,which(as.numeric(colSums(is.na(pmltest3))) != 20)]
+testPC <- predict(preProc, pmltest4[,-54])
+answers <- predict(modFit, testPC)
+```
+
+> answers
+ [1] B A C A A E D B A A B C B A E E A B B B
+Levels: A B C D E
+
+These predictions achieved 95% accuracy on submission (19 out of 20).
+
+
